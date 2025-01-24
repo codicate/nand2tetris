@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::io::{self, BufRead};
 use std::path::Path;
 
-fn main() {
+fn main() -> io::Result<()> {
     let comp_map: HashMap<&str, &str> = [
         ("0", "0101010"),
         ("1", "0111111"),
@@ -63,7 +64,7 @@ fn main() {
     .into_iter()
     .collect();
 
-    let mut symbol_table: HashMap<&str, u16> = [
+    let mut symbol_table: HashMap<String, u16> = [
         ("SP", 0),
         ("LCL", 1),
         ("ARG", 2),
@@ -89,72 +90,71 @@ fn main() {
         ("KBD", 24576),
     ]
     .into_iter()
+    .map(|(key, value)| (key.to_string(), value))
     .collect();
 
     // input file
     let file_name = std::env::args().nth(1).expect("No arguments provided.");
-    let contents = std::fs::read_to_string(&file_name).unwrap();
+    let input_file = File::open(&file_name)?;
+    let reader = io::BufReader::new(input_file);
 
     // output file
     let stem = Path::new(&file_name).file_stem().unwrap().to_str().unwrap();
     let output_file_name = format!("{stem}.hack");
     let mut output_file = File::create(output_file_name).unwrap();
 
-    // trim and filter lines
-    let lines: Vec<&str> = contents
-        .lines()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty()) // rid of empty lines
-        .filter(|line| !line.starts_with("//")) // rid of comments
-        .collect();
-
     // populate symbol table with labels
     let mut address = 0;
-    let lines: Vec<&str> = lines
-        .into_iter()
-        .filter(|line| {
-            if line.starts_with("(") {
-                let label = line.trim_matches(|c| c == '(' || c == ')');
-                symbol_table.insert(label, address);
-                false
-            } else {
-                address += 1;
-                true
-            }
-        })
-        .collect();
+    for (_, line) in reader.lines().enumerate() {
+        let line = line?;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+
+        if line.starts_with("(") {
+            let label = line.trim_matches(|c| c == '(' || c == ')').to_string();
+            symbol_table.insert(label, address);
+        } else {
+            address += 1;
+        }
+    }
+
+    let input_file = File::open(file_name)?;
+    let reader = io::BufReader::new(input_file);
 
     // translate asm lines to binary instructions
     let mut memory_idx = 15; // 15 since R0-15 are reserved
-    let lines: Vec<String> = lines
-        .into_iter()
-        .map(|line| {
-            if line.starts_with("@") {
-                // A instructions
-                let value = &line[1..];
-                let instruction = value
-                    .parse::<u16>()
-                    .ok()
-                    .or(symbol_table.get(value).copied()) // Try to get from the symbol table
-                    .unwrap_or_else(|| {
-                        // If not present, allocate it to a new memory address
-                        memory_idx += 1;
-                        symbol_table.insert(value, memory_idx);
-                        memory_idx
-                    });
-                format!("0{:015b}", instruction)
-            } else {
-                // C instrucitons
-                let (dest, rest) = line.split_once('=').unwrap_or(("", line));
-                let (comp, jump) = rest.split_once(';').unwrap_or((rest, ""));
-                format!("111{}{}{}", comp_map[comp], dest_map[dest], jump_map[jump])
-            }
-        })
-        .collect();
+    for (_, line) in reader.lines().enumerate() {
+        let line = line?;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("//") || line.starts_with("(") {
+            continue;
+        }
 
-    // write to output file
-    lines
-        .iter()
-        .try_for_each(|line| writeln!(output_file, "{line}"))
-        .unwrap();
+        let output = if line.starts_with("@") {
+            // A instructions
+            let value = line[1..].to_string();
+            let instruction = value
+                .parse::<u16>()
+                .ok()
+                .or(symbol_table.get(&value).copied()) // Try to get from the symbol table
+                .unwrap_or_else(|| {
+                    // If not present, allocate it to a new memory address
+                    memory_idx += 1;
+                    symbol_table.insert(value, memory_idx);
+                    memory_idx
+                });
+            format!("0{:015b}", instruction)
+        } else {
+            // C instrucitons
+            let (dest, rest) = line.split_once('=').unwrap_or(("", &line));
+            let (comp, jump) = rest.split_once(';').unwrap_or((rest, ""));
+            format!("111{}{}{}", comp_map[comp], dest_map[dest], jump_map[jump])
+        };
+
+        writeln!(output_file, "{output}")?;
+    }
+
+    Ok(())
 }
