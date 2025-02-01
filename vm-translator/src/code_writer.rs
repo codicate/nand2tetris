@@ -31,17 +31,17 @@ fn handle_comparison(command: &str, jump_idx: u32) -> String {
         _ => panic!("unknown command: {command}"),
     };
 
-    let sys_continue = &format!("@SYSCONTINUE{jump_idx}\n0;JMP");
+    let sys_continue = &format!("@SYS.CONTINUE{jump_idx}\n0;JMP");
     let asm = [
         &format!("D=D-M\n@SYSJUMP{jump_idx}\nD;{jump_type}\n"), // comparison
         DEREF_SP,
         "M=0", // false
         sys_continue,
-        &format!("(SYSJUMP{jump_idx})"), // jump
+        &format!("(SYS.JUMP{jump_idx})"), // jump
         DEREF_SP,
         "M=-1", // true
         sys_continue,
-        &format!("(SYSCONTINUE{jump_idx})"), // continue
+        &format!("(SYS.CONTINUE{jump_idx})"), // continue
     ];
     asm.join("\n")
 }
@@ -136,7 +136,73 @@ impl CodeWriter {
             "@R13\nA=M",  // A = addr
             "M=D",        // *addr = *SP
         ];
+
         let asm = if command == "push" { push_asm } else { pop_asm };
         asm.join("\n")
+    }
+
+    pub fn handle_branching(&self, command: &str, label: &str) -> String {
+        match command {
+            "label" => format!("({label})"),
+            "goto" => format!("@{label}\n0;JMP"),
+            "if-goto" => [DECREMENT_SP, DEREF_SP, "D=M", &format!("@{label}\nD;JNE")].join("\n"),
+            _ => panic!("Unknown command: {command}"),
+        }
+    }
+
+    pub fn handle_return(&self) -> String {
+        let mut asm = vec![
+            // copy return value to *ARG, which will be at the top of the stack when function ends
+            DECREMENT_SP,
+            DEREF_SP,
+            "D=M",
+            // *ARG = D
+            "@ARG\nA=M\nM=D",
+            // D = *LCL
+            "@LCL\nA=M\nD=A",
+            // D = *(LCL - 5), which is the return address
+            "@5\nA=D-A\nD=M",
+            // store return address to temp variable
+            STORE_TEMP,
+        ];
+
+        // SP = @ARG + 1
+        asm.push("@ARG\nD=M");
+        asm.push("@SP\nM=D");
+        asm.push(INCREMENT_SP);
+
+        // restore caller's original memory segment pointers
+        let labels = ["@THAT", "@THIS", "@ARG", "@LCL"];
+        for label in labels.iter() {
+            // LCL--
+            asm.push("@LCL\nM=M-1");
+            // D = *LCL
+            asm.push("A=M\nD=M");
+            // A = @label
+            asm.push(label);
+            // label = D
+            asm.push("M=D")
+        }
+
+        // jump to return address
+        asm.push(GET_TEMP);
+        asm.push("A=D\n0;JMP");
+
+        return asm.join("\n");
+    }
+
+    pub fn handle_function(&self, command: &str, name: &str, num_args: u16) -> String {
+        // function label
+        let label = format!("({name})");
+        let mut asm: Vec<&str> = vec![&label];
+
+        // push and initialize all local vars to 0
+        // for _ in 0..num_args {
+        //     asm.push(DEREF_SP);
+        //     asm.push("M=0");
+        //     asm.push(INCREMENT_SP);
+        // }
+
+        return asm.join("\n");
     }
 }
