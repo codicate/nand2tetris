@@ -22,8 +22,14 @@ fn main() -> io::Result<()> {
     let output_file_name = format!("{stem}.asm");
     let mut output_file = File::create(output_file_name).unwrap();
 
-    let mut code_writer = CodeWriter::new(stem.to_string());
+    // booting code
+    let mut boot_code_writer = CodeWriter::new(stem.to_string());
+    writeln!(output_file, "{}", boot_code_writer.booting_code())?;
+
     for file in input_files {
+        let stem = file.file_stem().unwrap().to_str().unwrap();
+        let mut code_writer = CodeWriter::new(stem.to_string());
+
         let file = File::open(file)?;
         let reader = BufReader::new(file);
 
@@ -100,7 +106,11 @@ fn parse_line(code_writer: &mut CodeWriter, line: &str) -> io::Result<String> {
                 .expect("Expected number of arguments for function")
                 .parse::<u16>()
                 .expect("Failed to parse number of arguments");
-            code_writer.handle_function(command, name, num_args)
+            if command == "function" {
+                code_writer.handle_function_init(name, num_args)
+            } else {
+                code_writer.handle_function_call(name, num_args)
+            }
         }
         _ => panic!("unknown command: {command}"),
     };

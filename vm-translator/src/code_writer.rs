@@ -33,7 +33,7 @@ fn handle_comparison(command: &str, jump_idx: u32) -> String {
 
     let sys_continue = &format!("@SYS.CONTINUE{jump_idx}\n0;JMP");
     let asm = [
-        &format!("D=D-M\n@SYSJUMP{jump_idx}\nD;{jump_type}\n"), // comparison
+        &format!("D=D-M\n@SYS.JUMP{jump_idx}\nD;{jump_type}\n"), // comparison
         DEREF_SP,
         "M=0", // false
         sys_continue,
@@ -49,6 +49,7 @@ fn handle_comparison(command: &str, jump_idx: u32) -> String {
 pub struct CodeWriter {
     file_name: String,
     jump_idx: u32,
+    call_idx: u32,
 }
 
 impl CodeWriter {
@@ -56,8 +57,16 @@ impl CodeWriter {
         CodeWriter {
             file_name,
             jump_idx: 0,
+            call_idx: 0,
         }
     }
+
+    pub fn booting_code(&mut self) -> String {
+        // set SP = 256 then call Sys.init
+        let call_sys_init = self.handle_function_call("Sys.init", 0);
+        format!("@256\nD=A\n@SP\nM=D\n{call_sys_init}")
+    }
+
     pub fn handle_arithmetic(&mut self, command: &str) -> String {
         let operation = match command {
             "add" => "M=D+M",
@@ -152,18 +161,18 @@ impl CodeWriter {
 
     pub fn handle_return(&self) -> String {
         let mut asm = vec![
-            // copy return value to *ARG, which will be at the top of the stack when function ends
-            DECREMENT_SP,
-            DEREF_SP,
-            "D=M",
-            // *ARG = D
-            "@ARG\nA=M\nM=D",
             // D = *LCL
             "@LCL\nA=M\nD=A",
             // D = *(LCL - 5), which is the return address
             "@5\nA=D-A\nD=M",
             // store return address to temp variable
             STORE_TEMP,
+            // copy return value to *ARG, which will be at the top of the stack when function ends
+            DECREMENT_SP,
+            DEREF_SP,
+            "D=M",
+            // *ARG = D
+            "@ARG\nA=M\nM=D",
         ];
 
         // SP = @ARG + 1
@@ -191,18 +200,66 @@ impl CodeWriter {
         return asm.join("\n");
     }
 
-    pub fn handle_function(&self, command: &str, name: &str, num_args: u16) -> String {
+    pub fn handle_function_init(&self, name: &str, num_args: u16) -> String {
         // function label
         let label = format!("({name})");
         let mut asm: Vec<&str> = vec![&label];
 
-        // push and initialize all local vars to 0
-        // for _ in 0..num_args {
-        //     asm.push(DEREF_SP);
-        //     asm.push("M=0");
-        //     asm.push(INCREMENT_SP);
-        // }
+        // set LCL to SP to initialize local variable segment
+        asm.push("@SP\nD=M\n@LCL\nM=D");
 
+        // push and initialize all local vars to 0
+        for _ in 0..num_args {
+            asm.push(DEREF_SP);
+            asm.push("M=0");
+            asm.push(INCREMENT_SP);
+        }
+
+        return asm.join("\n");
+    }
+
+    pub fn handle_function_call(&mut self, func_name: &str, num_args: u16) -> String {
+        let return_label = &format!("{}.{}.RETURN{}", self.file_name, func_name, self.call_idx);
+        let mut asm: Vec<&str> = vec![];
+        let labels = [
+            &format!("@{return_label}"),
+            "@LCL",
+            "@ARG",
+            "@THIS",
+            "@THAT",
+        ];
+
+        // store return address and old segment values
+        for label in labels.iter() {
+            asm.push(label);
+            if *label == labels[0] {
+                asm.push("D=A")
+            } else {
+                asm.push("D=M")
+            };
+
+            asm.push(DEREF_SP);
+            asm.push("M=D");
+            asm.push(INCREMENT_SP);
+        }
+
+        // calculate new ARG offset and set it
+        asm.push("@SP\nD=M");
+        let num_args_offset = &format!("@{num_args}");
+        asm.push(num_args_offset);
+        asm.push("D=D-A\n@5\nD=D-A");
+        asm.push("@ARG\nM=D");
+
+        // jump to function
+        let function_label = &format!("@{func_name}");
+        asm.push(function_label);
+        asm.push("0;JMP");
+
+        // return label
+        let return_label = &format!("({return_label})");
+        asm.push(return_label);
+
+        self.call_idx += 1;
         return asm.join("\n");
     }
 }
