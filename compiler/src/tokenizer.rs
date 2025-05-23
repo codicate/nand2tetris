@@ -7,14 +7,18 @@ enum TokenType {
     Identifier,
 }
 
+#[derive(Debug)]
 pub struct Token {
     type_: TokenType,
     content: String,
+    line_number: usize,
+    column_number: usize,
 }
 
 pub struct Tokenizer {
     idx: usize,
     content: Vec<char>,
+    newline_indices: Vec<usize>,
 }
 
 impl Tokenizer {
@@ -73,10 +77,42 @@ impl Tokenizer {
         }
     }
 
+    fn newline_indices(s: &str) -> Vec<usize> {
+        s.char_indices()
+            .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
+            .collect()
+    }
+
     pub fn new(content: String) -> Self {
         Tokenizer {
             idx: 0,
             content: content.chars().collect(),
+            newline_indices: Self::newline_indices(&content),
+        }
+    }
+
+    fn line_number(&self) -> usize {
+        match self.newline_indices.binary_search(&self.idx) {
+            Ok(pos) => pos + 1 + 1, // exact match means index is right at a newline → next line
+            Err(pos) => pos + 1,    // pos = how many newlines are before index
+        }
+    }
+
+    fn column_number(&self) -> usize {
+        let line_number = self.line_number();
+        if line_number == 1 {
+            self.idx
+        } else {
+            self.idx - self.newline_indices[self.line_number() - 2]
+        }
+    }
+
+    fn new_token(&self, type_: TokenType, content: String) -> Token {
+        Token {
+            line_number: self.line_number(),
+            column_number: self.column_number() - content.len(),
+            type_,
+            content,
         }
     }
 
@@ -103,10 +139,9 @@ impl Tokenizer {
                 if let Some(pos) = rest.iter().position(|&c| c == '"') {
                     let string_constant = &rest[..pos];
                     self.idx += pos + 2; // skip over ""
-                    return Some(Token {
-                        type_: TokenType::StringConstant,
-                        content: string_constant.iter().collect(),
-                    });
+                    return Some(
+                        self.new_token(TokenType::StringConstant, string_constant.iter().collect()),
+                    );
                 } else {
                     eprintln!("unclosed double quote \"");
                     std::process::exit(1);
@@ -141,10 +176,7 @@ impl Tokenizer {
 
             // symbol
             self.idx += 1;
-            return Some(Token {
-                type_: TokenType::Symbol,
-                content: Self::escape_xml_char(cur),
-            });
+            return Some(self.new_token(TokenType::Symbol, Self::escape_xml_char(cur)));
         }
 
         // we consider the current string slice before encountering another symbol
@@ -156,26 +188,17 @@ impl Tokenizer {
 
         // keyword
         if Self::KEYWORDS.contains(&token.as_str()) {
-            return Some(Token {
-                type_: TokenType::Keyword,
-                content: token,
-            });
+            return Some(self.new_token(TokenType::Keyword, token));
         }
 
         // integer constant
         if Self::is_all_digits(&token) {
-            return Some(Token {
-                type_: TokenType::IntegerConstant,
-                content: token,
-            });
+            return Some(self.new_token(TokenType::IntegerConstant, token));
         }
 
         // identifier
         if Self::is_valid_identifier(&token) {
-            return Some(Token {
-                type_: TokenType::Identifier,
-                content: token,
-            });
+            return Some(self.new_token(TokenType::Identifier, token));
         } else {
             eprintln!("illegal token {:?}", token);
             std::process::exit(1);
@@ -188,6 +211,7 @@ impl Tokenizer {
 
         while self.has_more_tokens() {
             if let Some(token) = self.advance() {
+                println!("{:#?}", token);
                 let type_ = Self::lowercase_first_letter(&format!("{:?}", token.type_));
                 output.push_str(&format!("<{}> {} </{}>\n", type_, token.content, type_));
             }
