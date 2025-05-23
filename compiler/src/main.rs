@@ -1,9 +1,18 @@
 mod tokenizer;
 
 use std::env;
-use std::fs;
-use std::path::Path;
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use tokenizer::Tokenizer;
+
+fn convert_file_extension(path: &Path, extension: &str) -> PathBuf {
+    let stem = path.file_stem().unwrap().to_string_lossy();
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+
+    // Construct new path: parent + stem + ".vm"
+    parent.join(format!("{}.{}", stem, extension))
+}
 
 fn process_file(path: &Path) {
     let content = match fs::read_to_string(path) {
@@ -14,8 +23,11 @@ fn process_file(path: &Path) {
         }
     };
 
-    let tokenizer = Tokenizer::new(content);
+    let mut tokenizer = Tokenizer::new(content);
     let output = tokenizer.output();
+    let output_path = convert_file_extension(path, "tokens.xml");
+    let mut output_file = File::create(output_path).unwrap();
+    output_file.write_all(output.as_bytes()).unwrap();
 }
 
 fn main() {
