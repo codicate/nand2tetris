@@ -23,7 +23,7 @@ fn process_file(path: &Path) {
         }
     };
 
-    let mut tokenizer = Tokenizer::new(content);
+    let mut tokenizer = Tokenizer::new(path.to_string_lossy().to_string(), content);
     let output = tokenizer.output();
     let output_path = convert_file_extension(path, "tokens.xml");
     let mut output_file = File::create(output_path).unwrap();

@@ -17,6 +17,7 @@ pub struct Token {
 
 pub struct Tokenizer {
     idx: usize,
+    path: String,
     content: Vec<char>,
     newline_indices: Vec<usize>,
 }
@@ -83,9 +84,10 @@ impl Tokenizer {
             .collect()
     }
 
-    pub fn new(content: String) -> Self {
+    pub fn new(path: String, content: String) -> Self {
         Tokenizer {
             idx: 0,
+            path,
             content: content.chars().collect(),
             newline_indices: Self::newline_indices(&content),
         }
@@ -116,6 +118,17 @@ impl Tokenizer {
         }
     }
 
+    fn error(&self, content: &str) -> ! {
+        eprintln!(
+            "{} {}:{}:{}",
+            content,
+            self.path,
+            self.line_number(),
+            self.column_number()
+        );
+        std::process::exit(1);
+    }
+
     pub fn has_more_tokens(&self) -> bool {
         return self.idx < self.content.len();
     }
@@ -143,8 +156,7 @@ impl Tokenizer {
                         self.new_token(TokenType::StringConstant, string_constant.iter().collect()),
                     );
                 } else {
-                    eprintln!("unclosed double quote \"");
-                    std::process::exit(1);
+                    self.error("unclosed double quote \"");
                 }
             }
 
@@ -167,8 +179,7 @@ impl Tokenizer {
                     if let Some(pos) = rest.windows(2).position(|w| w == ['*', '/']) {
                         self.idx += pos + 4; // skip over /**/
                     } else {
-                        eprintln!("unclosed multi line comment /*");
-                        std::process::exit(1);
+                        self.error("unclosed multi line comment /*");
                     }
                     return None;
                 }
@@ -200,8 +211,7 @@ impl Tokenizer {
         if Self::is_valid_identifier(&token) {
             return Some(self.new_token(TokenType::Identifier, token));
         } else {
-            eprintln!("illegal token {:?}", token);
-            std::process::exit(1);
+            self.error(&format!("illegal token {:?}", token));
         }
     }
 
@@ -211,7 +221,6 @@ impl Tokenizer {
 
         while self.has_more_tokens() {
             if let Some(token) = self.advance() {
-                println!("{:#?}", token);
                 let type_ = Self::lowercase_first_letter(&format!("{:?}", token.type_));
                 output.push_str(&format!("<{}> {} </{}>\n", type_, token.content, type_));
             }
