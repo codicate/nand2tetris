@@ -16,10 +16,11 @@ pub struct Token {
 }
 
 pub struct Tokenizer {
-    idx: usize,
     path: String,
     content: Vec<char>,
-    newline_indices: Vec<usize>,
+    idx: usize,
+    line_number: usize,
+    line_start_idx: usize, // (current) idx - line_start_idx = column_number
     peeked: Option<Token>,
 }
 
@@ -79,42 +80,21 @@ impl Tokenizer {
         }
     }
 
-    fn newline_indices(s: &str) -> Vec<usize> {
-        s.char_indices()
-            .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
-            .collect()
-    }
-
     pub fn new(path: String, content: String) -> Self {
         Tokenizer {
-            idx: 0,
             path,
             content: content.chars().collect(),
-            newline_indices: Self::newline_indices(&content),
             peeked: None,
-        }
-    }
-
-    fn line_number(&self) -> usize {
-        match self.newline_indices.binary_search(&self.idx) {
-            Ok(pos) => pos + 1 + 1, // exact match means index is right at a newline → next line
-            Err(pos) => pos + 1,    // pos = how many newlines are before index
-        }
-    }
-
-    fn column_number(&self) -> usize {
-        let line_number = self.line_number();
-        if line_number == 1 {
-            self.idx
-        } else {
-            self.idx - self.newline_indices[self.line_number() - 2]
+            idx: 0,
+            line_number: 0,
+            line_start_idx:0
         }
     }
 
     fn new_token(&self, type_: TokenType, content: String) -> Token {
         Token {
-            line_number: self.line_number(),
-            column_number: self.column_number() - content.len(),
+            line_number: self.line_number,
+            column_number: self.idx - self.line_start_idx,
             type_,
             content,
         }
@@ -125,8 +105,8 @@ impl Tokenizer {
             "{} {}:{}:{}",
             content,
             self.path,
-            self.line_number(),
-            self.column_number()
+            self.line_number,
+            self.idx - self.line_start_idx // column_number
         );
         std::process::exit(1);
     }
@@ -137,6 +117,13 @@ impl Tokenizer {
 
     fn handle_whitespace(&mut self) -> Option<Token> {
         self.idx += 1;
+        None
+    }
+
+    // ignores CR (MacOS pre-OSX) which may cause bug with line/col calculation
+    fn handle_newline(&mut self) -> Option<Token> {
+        self.idx += 1;
+        self.line_number += 1;
         None
     }
 
@@ -193,7 +180,8 @@ impl Tokenizer {
         // whitespace, comments, symbols, and string constants
         if Self::SYMBOLS.contains(&cur) {
             return match cur {
-                ' ' | '\n' | '\r' | '\t' => self.handle_whitespace(),
+                ' ' | '\t' | '\r' => self.handle_whitespace(),
+                '\n' => self.handle_newline(),
                 '"' => self.handle_string_constant(),
                 '/' if self.idx + 1 < self.content.len() => self.handle_slash(),
                 _ => self.handle_general_symbol(cur),
