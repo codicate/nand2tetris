@@ -15,6 +15,20 @@ pub struct Token {
     column_number: usize,
 }
 
+impl Token {
+    fn lowercase_first_letter(s: &str) -> String {
+        let mut chars = s.chars();
+        match chars.next() {
+            Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
+            None => String::new(),
+        }
+    }
+    pub fn output(&self) -> String {
+        let type_ = Self::lowercase_first_letter(&format!("{:?}", self.type_));
+        format!("<{}> {} </{}>\n", type_, self.content, type_)
+    }
+}
+
 pub struct Tokenizer {
     path: String,
     content: Vec<char>,
@@ -69,14 +83,6 @@ impl Tokenizer {
             '"' => "&quot;".to_string(),
             '&' => "&amp;".to_string(),
             _ => c.to_string(),
-        }
-    }
-
-    fn lowercase_first_letter(s: &str) -> String {
-        let mut chars = s.chars();
-        match chars.next() {
-            Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
-            None => String::new(),
         }
     }
 
@@ -227,11 +233,11 @@ impl Tokenizer {
         return None;
     }
 
-    pub fn expect(&mut self, type_: TokenType, content: Option<&str>) -> Option<Token> {
+    pub fn expect(&mut self, type_: TokenType, content: Option<&str>) -> Token {
         if let Some(token) = self.peek() {
             if token.type_ == type_ && content.map_or(true, |c| c == token.content) {
                 self.peeked = None; // Clear peeked token after consuming
-                return Some(token);
+                return token;
             } else {
                 self.error(&format!(
                     "expected {:?}({}), found {:?}({})",
@@ -252,8 +258,7 @@ impl Tokenizer {
 
         while self.has_more_tokens() {
             if let Some(token) = self.consume() {
-                let type_ = Self::lowercase_first_letter(&format!("{:?}", token.type_));
-                output.push_str(&format!("<{}> {} </{}>\n", type_, token.content, type_));
+                output.push_str(&token.output());
             }
         }
 

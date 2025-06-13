@@ -6,6 +6,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tokenizer::Tokenizer;
+use crate::parser::Parser;
 
 // Convert the file extension of a given path to the specified extension
 fn convert_file_extension(path: &Path, extension: &str) -> PathBuf {
@@ -14,6 +15,14 @@ fn convert_file_extension(path: &Path, extension: &str) -> PathBuf {
 
     // Construct new path: parent + stem + ".vm"
     parent.join(format!("{}.{}", stem, extension))
+}
+
+fn generate_tokenizer_output(path: &Path, content: String) {
+    let mut tokenizer = Tokenizer::new(path.to_string_lossy().to_string(), content);
+    let output = tokenizer.output();
+    let output_path = convert_file_extension(path, "tokens.xml");
+    let mut output_file = File::create(output_path).unwrap();
+    output_file.write_all(output.as_bytes()).unwrap();
 }
 
 fn parse_file(path: &Path) {
@@ -25,8 +34,8 @@ fn parse_file(path: &Path) {
         }
     };
 
-    let mut tokenizer = Tokenizer::new(path.to_string_lossy().to_string(), content);
-    let output = tokenizer.output();
+    let mut parser = Parser::new(path.to_string_lossy().to_string(), content);
+    let output = parser.parse();
     let output_path = convert_file_extension(path, "tokens.xml");
     let mut output_file = File::create(output_path).unwrap();
     output_file.write_all(output.as_bytes()).unwrap();
