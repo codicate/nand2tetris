@@ -9,8 +9,8 @@ pub enum TokenType {
 
 #[derive(Debug, Clone)]
 pub struct Token {
-    type_: TokenType,
-    content: String,
+    pub type_: TokenType,
+    pub content: String,
     line_number: usize,
     column_number: usize,
 }
@@ -93,7 +93,7 @@ impl Tokenizer {
             peeked: None,
             idx: 0,
             line_number: 0,
-            line_start_idx:0
+            line_start_idx: 0,
         }
     }
 
@@ -106,7 +106,7 @@ impl Tokenizer {
         }
     }
 
-    fn error(&self, content: &str) -> ! {
+    pub fn error(&self, content: &str) -> ! {
         eprintln!(
             "{} {}:{}:{}",
             content,
@@ -178,9 +178,8 @@ impl Tokenizer {
         Some(self.new_token(TokenType::Symbol, Self::escape_xml_char(cur)))
     }
 
-    // Consumes the next token and returns it
     // Will return None if the next token is whitespace or a comment! (or no more tokens)
-    fn consume(&mut self) -> Option<Token> {
+    fn advance(&mut self) -> Option<Token> {
         let cur = self.content[self.idx];
 
         // whitespace, comments, symbols, and string constants
@@ -219,36 +218,48 @@ impl Tokenizer {
         }
     }
 
-    // Wraps `consume` to skip over whitespace and comments to always return a valid token
-    pub fn peek(&mut self) -> Option<Token> {
+    // Wraps `advance` to skip over whitespace and comments to always return a valid token
+    pub fn peek(&mut self) -> Token {
         if self.peeked.is_some() {
-            return self.peeked.clone();
+            return self.peeked.clone().unwrap();
         }
         while self.has_more_tokens() {
-            if let Some(token) = self.consume() {
+            if let Some(token) = self.advance() {
                 self.peeked = Some(token.clone());
-                return Some(token);
+                return token;
             }
         }
-        return None;
+        self.error("expecting more tokens");
+    }
+
+    pub fn consume(&mut self) -> Token {
+        let token = self.peek();
+        self.peeked = None;
+        token
+    }
+
+    pub fn matches(&mut self, type_: TokenType, content: Option<&str>) -> bool {
+        let token = self.peek();
+        if token.type_ == type_ && content.map_or(true, |c| c == token.content) {
+            true
+        } else {
+            false
+        }
     }
 
     pub fn expect(&mut self, type_: TokenType, content: Option<&str>) -> Token {
-        if let Some(token) = self.peek() {
-            if token.type_ == type_ && content.map_or(true, |c| c == token.content) {
-                self.peeked = None; // Clear peeked token after consuming
-                return token;
-            } else {
-                self.error(&format!(
-                    "expected {:?}({}), found {:?}({})",
-                    type_,
-                    content.unwrap_or("ANY"),
-                    token.type_,
-                    token.content
-                ));
-            }
+        let token = self.peek();
+        if self.matches(type_.clone(), content) {
+            self.peeked = None; // Clear peeked token after consuming
+            token
         } else {
-            self.error(&format!("expected {:?}, but no more tokens", type_));
+            self.error(&format!(
+                "expected {:?}({}), found {:?}({})",
+                type_,
+                content.unwrap_or("ANY"),
+                token.type_,
+                token.content
+            ));
         }
     }
 
@@ -257,9 +268,8 @@ impl Tokenizer {
         output.push_str("<tokens>\n");
 
         while self.has_more_tokens() {
-            if let Some(token) = self.consume() {
-                output.push_str(&token.output());
-            }
+            let token = self.consume();
+            output.push_str(&token.output());
         }
 
         output.push_str("</tokens>\n");
