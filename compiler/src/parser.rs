@@ -321,7 +321,7 @@ impl Parser {
             }
             (TokenType::Symbol, "(") => {
                 self.compile_expression();
-                self.expect(TokenType::Keyword, Some(")"));
+                self.expect(TokenType::Symbol, Some(")"));
             }
             (TokenType::Identifier, _) => {
                 let next = self.tokenizer.peek();
@@ -331,7 +331,8 @@ impl Parser {
                         self.compile_expression();
                         self.expect(TokenType::Symbol, Some("]"));
                     }
-                    _ => self.compile_subroutine_call(),
+                    (TokenType::Symbol, "." | "(") => self.compile_subroutine_call(),
+                    _ => {}
                 }
             }
             _ => self.error(token),

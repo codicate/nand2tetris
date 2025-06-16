@@ -23,9 +23,25 @@ impl Token {
             None => String::new(),
         }
     }
+
+    fn escape_xml_char(c: &str) -> String {
+        match c {
+            "<" => "&lt;".to_string(),
+            ">" => "&gt;".to_string(),
+            "\"" => "&quot;".to_string(),
+            "&" => "&amp;".to_string(),
+            _ => c.to_string(),
+        }
+    }
+
     pub fn output(&self) -> String {
         let type_ = Self::lowercase_first_letter(&format!("{:?}", self.type_));
-        format!("<{}> {} </{}>\n", type_, self.content, type_)
+        format!(
+            "<{}> {} </{}>\n",
+            type_,
+            Self::escape_xml_char(self.content.as_str()),
+            type_
+        )
     }
 }
 
@@ -76,31 +92,30 @@ impl Tokenizer {
         s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     }
 
-    fn escape_xml_char(c: char) -> String {
-        match c {
-            '<' => "&lt;".to_string(),
-            '>' => "&gt;".to_string(),
-            '"' => "&quot;".to_string(),
-            '&' => "&amp;".to_string(),
-            _ => c.to_string(),
-        }
-    }
-
     pub fn new(path: String, content: String) -> Self {
         Tokenizer {
             path,
             content: content.chars().collect(),
             peeked: None,
             idx: 0,
-            line_number: 0,
+            line_number: 1,
             line_start_idx: 0,
+        }
+    }
+
+    fn column_number(&self, type_: TokenType, content_length: usize) -> usize {
+        let column_number = self.idx - self.line_start_idx - content_length;
+        if type_ == TokenType::StringConstant {
+            column_number - 2
+        } else {
+            column_number
         }
     }
 
     fn new_token(&self, type_: TokenType, content: String) -> Token {
         Token {
             line_number: self.line_number,
-            column_number: self.idx - self.line_start_idx,
+            column_number: self.column_number(type_.clone(), content.len()),
             type_,
             content,
         }
@@ -112,7 +127,7 @@ impl Tokenizer {
             content,
             self.path,
             self.line_number,
-            self.idx - self.line_start_idx // column_number
+            self.idx - self.line_start_idx,
         );
         std::process::exit(1);
     }
@@ -126,10 +141,11 @@ impl Tokenizer {
         None
     }
 
-    // ignores CR (MacOS pre-OSX) which may cause bug with line/col calculation
+    // ignores CR (macOS pre-OSX) which may cause bug with line/col calculation
     fn handle_newline(&mut self) -> Option<Token> {
         self.idx += 1;
         self.line_number += 1;
+        self.line_start_idx = self.idx;
         None
     }
 
@@ -175,7 +191,7 @@ impl Tokenizer {
 
     fn handle_general_symbol(&mut self, cur: char) -> Option<Token> {
         self.idx += 1;
-        Some(self.new_token(TokenType::Symbol, Self::escape_xml_char(cur)))
+        Some(self.new_token(TokenType::Symbol, cur.to_string()))
     }
 
     // Will return None if the next token is whitespace or a comment! (or no more tokens)
@@ -268,8 +284,9 @@ impl Tokenizer {
         output.push_str("<tokens>\n");
 
         while self.has_more_tokens() {
-            let token = self.consume();
-            output.push_str(&token.output());
+            if let Some(token) = self.advance() {
+                output.push_str(&token.output());
+            }
         }
 
         output.push_str("</tokens>\n");

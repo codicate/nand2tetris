@@ -35,7 +35,7 @@ fn parse_file(path: &Path) {
 
     let mut parser = Parser::new(path.to_string_lossy().to_string(), content);
     let output = parser.parse();
-    let output_path = convert_file_extension(path, "tokens.xml");
+    let output_path = convert_file_extension(path, "parse.xml");
     let mut output_file = File::create(output_path).unwrap();
     output_file.write_all(output.as_bytes()).unwrap();
 }
