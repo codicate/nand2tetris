@@ -30,7 +30,7 @@ impl From<Kind> for Segment {
             Kind::Field => Segment::This,
             Kind::Arg => Segment::Argument,
             Kind::Var => Segment::Local,
-            Kind::None => panic!(),
+            Kind::None => panic!("Invalid kind: None"),
         }
     }
 }
@@ -63,8 +63,8 @@ impl SymbolTable {
 
     pub fn reset(&mut self) {
         self.table.clear();
-        for kind in [Kind::Static, Kind::Field, Kind::Arg, Kind::Var] {
-            self.kind_counters.insert(kind, 0);
+        for counter in self.kind_counters.values_mut() {
+            *counter = 0;
         }
     }
 
@@ -72,8 +72,7 @@ impl SymbolTable {
         if kind == Kind::None {
             return;
         }
-
-        let index = *self.kind_counters.get(&kind).unwrap_or(&0);
+        let index = self.kind_counters[&kind];
         self.table.insert(
             name.clone(),
             Symbol {
@@ -90,18 +89,7 @@ impl SymbolTable {
         *self.kind_counters.get(&kind).unwrap_or(&0)
     }
 
-    pub fn kind_of(&self, name: &str) -> Kind {
-        self.table
-            .get(name)
-            .map(|s| s.kind.clone())
-            .unwrap_or(Kind::None)
-    }
-
-    pub fn type_of(&self, name: &str) -> String {
-        self.table.get(name).map(|s| s.type_.clone()).unwrap()
-    }
-
-    pub fn index_of(&self, name: &str) -> usize {
-        self.table.get(name).map(|s| s.index).unwrap()
+    pub fn get(&self, name: &str) -> Option<Symbol> {
+        self.table.get(name).cloned()
     }
 }

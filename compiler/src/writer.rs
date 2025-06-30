@@ -27,6 +27,7 @@ impl Writer {
     pub fn new(path: &Path) -> Self {
         let class_name = path.file_stem().unwrap().to_str().unwrap().to_owned();
         let file = File::create(path.with_extension("vm")).unwrap();
+
         Writer {
             class_name,
             file,
@@ -80,6 +81,7 @@ impl Writer {
             self.class_name, func_name, n_vars
         )
         .unwrap();
+
         for line in &self.buffer {
             writeln!(self.file, "{}", line).unwrap();
         }

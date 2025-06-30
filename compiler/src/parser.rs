@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::{
-    symbol_table::{Kind, SymbolTable},
+    symbol_table::{Kind, Symbol, SymbolTable},
     tokenizer::{Token, TokenType, Tokenizer},
     writer::{Segment, Writer},
 };
@@ -61,26 +61,14 @@ impl Parser {
         ));
     }
 
-    fn lookup_symbol(&mut self, name: &str) -> (Kind, String, usize) {
-        let kind = self.func_symbols.kind_of(name);
-        if kind != Kind::None {
-            return (
-                kind,
-                self.func_symbols.type_of(name),
-                self.func_symbols.index_of(name),
-            );
+    fn lookup_symbol(&mut self, name: &str) -> Option<Symbol> {
+        if let Some(symbol) = self.func_symbols.get(name) {
+            return Some(symbol);
         }
-
-        let kind = self.class_symbols.kind_of(name);
-        if kind != Kind::None {
-            return (
-                kind,
-                self.class_symbols.type_of(name),
-                self.class_symbols.index_of(name),
-            );
+        if let Some(symbol) = self.class_symbols.get(name) {
+            return Some(symbol);
         }
-
-        (Kind::None, String::new(), 0)
+        None
     }
 
     fn compile_class(&mut self) {
@@ -90,21 +78,22 @@ impl Parser {
 
         while self.tokenizer.has_more_tokens() {
             let token = self.tokenizer.peek();
-            match (&token.type_, token.content.as_str()) {
-                (TokenType::Keyword, "static" | "field") => {
-                    self.compile_class_var_dec();
-                }
-                _ => break,
+            if match_token!(token, (TokenType::Keyword, "static" | "field")) {
+                self.compile_class_var_dec();
+            } else {
+                break;
             }
         }
 
         while self.tokenizer.has_more_tokens() {
             let token = self.tokenizer.peek();
-            match (&token.type_, token.content.as_str()) {
-                (TokenType::Keyword, "constructor" | "function" | "method") => {
-                    self.compile_subroutine_dec();
-                }
-                _ => break,
+            if match_token!(
+                token,
+                (TokenType::Keyword, "constructor" | "function" | "method")
+            ) {
+                self.compile_subroutine_dec();
+            } else {
+                break;
             }
         }
 
@@ -118,13 +107,12 @@ impl Parser {
 
         while self.tokenizer.has_more_tokens() {
             let token = self.tokenizer.peek();
-            match (&token.type_, token.content.as_str()) {
-                (TokenType::Symbol, ",") => {
-                    self.tokenizer.consume();
-                    let token = self.tokenizer.expect(TokenType::Identifier, None);
-                    var_list.push(token.content);
-                }
-                _ => break,
+            if match_token!(token, (TokenType::Symbol, ",")) {
+                self.tokenizer.consume();
+                let token = self.tokenizer.expect(TokenType::Identifier, None);
+                var_list.push(token.content);
+            } else {
+                break;
             }
         }
         var_list
@@ -202,21 +190,24 @@ impl Parser {
 
     fn compile_parameter_list(&mut self) {
         self.tokenizer.expect(TokenType::Symbol, Some("("));
-        let token = self.tokenizer.peek();
-        if !match_token!(token, (TokenType::Symbol, ")")) {
-            self.compile_parameter();
 
-            while self.tokenizer.has_more_tokens() {
-                let token = self.tokenizer.peek();
-                match (&token.type_, token.content.as_str()) {
-                    (TokenType::Symbol, ",") => {
-                        self.tokenizer.consume();
-                        self.compile_parameter();
-                    }
-                    _ => break,
-                }
+        let token = self.tokenizer.peek();
+        if match_token!(token, (TokenType::Symbol, ")")) {
+            self.tokenizer.consume();
+            return;
+        }
+
+        self.compile_parameter();
+        while self.tokenizer.has_more_tokens() {
+            let token = self.tokenizer.peek();
+            if match_token!(token, (TokenType::Symbol, ",")) {
+                self.tokenizer.consume();
+                self.compile_parameter();
+            } else {
+                break;
             }
         }
+
         self.tokenizer.expect(TokenType::Symbol, Some(")"));
     }
 
@@ -225,11 +216,10 @@ impl Parser {
 
         while self.tokenizer.has_more_tokens() {
             let token = self.tokenizer.peek();
-            match (&token.type_, token.content.as_str()) {
-                (TokenType::Keyword, "var") => {
-                    self.compile_var_dec();
-                }
-                _ => break,
+            if match_token!(token, (TokenType::Keyword, "var")) {
+                self.compile_var_dec();
+            } else {
+                break;
             }
         }
 
@@ -276,8 +266,11 @@ impl Parser {
     /// For example, for `a[i]`, it computes `a + i` and pushes the address of `a[i]`
     fn compile_array_access(&mut self, name: &str) {
         self.tokenizer.expect(TokenType::Symbol, Some("["));
-        let (kind, _, index) = self.lookup_symbol(name);
-        self.writer.write_push(kind.clone().into(), index);
+        let symbol = self
+            .lookup_symbol(name)
+            .expect(&format!("Undefined identifier: {}", name));
+        self.writer
+            .write_push(symbol.kind.clone().into(), symbol.index);
         self.compile_expression();
         self.writer.write_arithmetic("add"); // add index to base address
         self.tokenizer.expect(TokenType::Symbol, Some("]"));
@@ -304,8 +297,10 @@ impl Parser {
             self.writer.write_push(Segment::Temp, 0); // push RHS back to stack
             self.writer.write_pop(Segment::That, 0); // store RHS to LHS (a[i])
         } else {
-            let (kind, _, index) = self.lookup_symbol(&name);
-            self.writer.write_pop(kind.into(), index);
+            let symbol = self
+                .lookup_symbol(&name)
+                .expect(&format!("Undefined identifier: {}", name));
+            self.writer.write_pop(symbol.kind.into(), symbol.index);
         }
     }
 
@@ -385,14 +380,69 @@ impl Parser {
 
         while self.tokenizer.has_more_tokens() {
             let token = self.tokenizer.peek();
-            match (&token.type_, token.content.as_str()) {
-                (TokenType::Symbol, "+" | "-" | "*" | "/" | "&" | "|" | "<" | ">" | "=") => {
-                    let op = self.tokenizer.consume();
-                    self.compile_term();
-                    let command = Self::translate_op(&op.content);
-                    self.writer.write_arithmetic(command);
+            if match_token!(
+                token,
+                (
+                    TokenType::Symbol,
+                    "+" | "-" | "*" | "/" | "&" | "|" | "<" | ">" | "="
+                )
+            ) {
+                let op = self.tokenizer.consume();
+                self.compile_term();
+                let command = Self::translate_op(&op.content);
+                self.writer.write_arithmetic(command);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn compile_identifier(&mut self, identifier: String) {
+        let next = self.tokenizer.peek();
+        match (&next.type_, next.content.as_str()) {
+            (TokenType::Symbol, "[") => {
+                self.compile_array_access(&identifier);
+                self.writer.write_pop(Segment::Pointer, 1);
+                self.writer.write_push(Segment::That, 0); // push actual value onto stack
+            }
+            (TokenType::Symbol, "(") => {
+                // pass 'this' as the first argument, this = pointer 0
+                self.writer.write_push(Segment::Pointer, 0);
+                let n_args = self.compile_argument_list();
+                self.writer.write_call(
+                    &format!("{}.{}", self.writer.class_name, identifier),
+                    n_args + 1,
+                );
+            }
+            (TokenType::Symbol, ".") => {
+                let mut class_name = identifier;
+                let symbol = self.lookup_symbol(&class_name);
+
+                // If the identifier is an object instance, hence a method call,
+                // we need to push the object instance onto the stack as 'this'.
+                let is_method = symbol.is_some();
+                if is_method {
+                    let symbol = symbol.clone().unwrap();
+                    self.writer.write_push(symbol.kind.into(), symbol.index);
                 }
-                _ => break,
+
+                self.tokenizer.expect(TokenType::Symbol, Some("."));
+                let func_name = self.tokenizer.expect(TokenType::Identifier, None).content;
+                let mut n_args = self.compile_argument_list();
+
+                if is_method {
+                    n_args += 1; // pass 'this' as the first argument
+                    class_name = symbol.unwrap().type_;
+                }
+
+                self.writer
+                    .write_call(&format!("{}.{}", class_name, func_name), n_args);
+            }
+            _ => {
+                let symbol = self
+                    .lookup_symbol(&identifier)
+                    .expect(&format!("Undefined identifier: {}", identifier));
+                self.writer.write_push(symbol.kind.into(), symbol.index);
             }
         }
     }
@@ -438,54 +488,7 @@ impl Parser {
                 self.tokenizer.expect(TokenType::Symbol, Some(")"));
             }
             (TokenType::Identifier, _) => {
-                let next = self.tokenizer.peek();
-                match (&next.type_, next.content.as_str()) {
-                    (TokenType::Symbol, "[") => {
-                        self.compile_array_access(&token.content);
-                        self.writer.write_pop(Segment::Pointer, 1);
-                        self.writer.write_push(Segment::That, 0);
-                    }
-                    (TokenType::Symbol, "(") => {
-                        // pass 'this' as the first argument, this = pointer 0
-                        self.writer.write_push(Segment::Pointer, 0);
-                        let n_args = self.compile_argument_list();
-                        self.writer.write_call(
-                            &format!("{}.{}", self.writer.class_name, token.content),
-                            n_args + 1,
-                        );
-                    }
-                    (TokenType::Symbol, ".") => {
-                        let mut class_name = token.content;
-                        let (kind, type_, index) = self.lookup_symbol(&class_name);
-
-                        // If the identifier is an object instance, hence a method call,
-                        // we need to push the object instance onto the stack as 'this'.
-                        let is_method = kind != Kind::None;
-                        if is_method {
-                            self.writer.write_push(kind.into(), index);
-                        }
-
-                        self.tokenizer.expect(TokenType::Symbol, Some("."));
-                        let func_name = self.tokenizer.expect(TokenType::Identifier, None).content;
-                        let mut n_args = self.compile_argument_list();
-
-                        if is_method {
-                            n_args += 1; // pass 'this' as the first argument
-                            class_name = type_;
-                        }
-
-                        self.writer
-                            .write_call(&format!("{}.{}", class_name, func_name), n_args);
-                    }
-                    _ => {
-                        let (kind, _, index) = self.lookup_symbol(&token.content);
-                        if kind == Kind::None {
-                            self.tokenizer
-                                .error(&format!("Undefined identifier: {}", token.content));
-                        }
-                        self.writer.write_push(kind.into(), index);
-                    }
-                }
+                self.compile_identifier(token.content);
             }
             _ => self.error(token),
         }
@@ -493,23 +496,24 @@ impl Parser {
 
     fn compile_argument_list(&mut self) -> usize {
         self.tokenizer.expect(TokenType::Symbol, Some("("));
-        let mut n_args = 0;
 
         let token = self.tokenizer.peek();
-        if !match_token!(token, (TokenType::Symbol, ")")) {
-            self.compile_expression();
-            n_args += 1;
+        if match_token!(token, (TokenType::Symbol, ")")) {
+            self.tokenizer.consume();
+            return 0;
+        }
 
-            while self.tokenizer.has_more_tokens() {
-                let token = self.tokenizer.peek();
-                match (&token.type_, token.content.as_str()) {
-                    (TokenType::Symbol, ",") => {
-                        self.tokenizer.consume();
-                        self.compile_expression();
-                        n_args += 1;
-                    }
-                    _ => break,
-                }
+        self.compile_expression();
+        let mut n_args = 1;
+
+        while self.tokenizer.has_more_tokens() {
+            let token = self.tokenizer.peek();
+            if match_token!(token, (TokenType::Symbol, ",")) {
+                self.tokenizer.consume();
+                self.compile_expression();
+                n_args += 1;
+            } else {
+                break;
             }
         }
 
