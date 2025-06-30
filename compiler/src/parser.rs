@@ -1,8 +1,7 @@
-use core::net;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::{
-    symbol_table::{Kind, Symbol, SymbolTable},
+    symbol_table::{Kind, SymbolTable},
     tokenizer::{Token, TokenType, Tokenizer},
     writer::{Segment, Writer},
 };
@@ -61,18 +60,26 @@ impl Parser {
         ));
     }
 
-    fn lookup_symbol(&mut self, name: &str) -> (Kind, usize) {
+    fn lookup_symbol(&mut self, name: &str) -> (Kind, String, usize) {
         let kind = self.func_symbols.kind_of(name);
         if kind != Kind::None {
-            return (kind, self.func_symbols.index_of(name));
+            return (
+                kind,
+                self.func_symbols.type_of(name),
+                self.func_symbols.index_of(name),
+            );
         }
 
         let kind = self.class_symbols.kind_of(name);
         if kind != Kind::None {
-            return (kind, self.class_symbols.index_of(name));
+            return (
+                kind,
+                self.class_symbols.type_of(name),
+                self.class_symbols.index_of(name),
+            );
         }
 
-        (Kind::None, 0)
+        (Kind::None, String::new(), 0)
     }
 
     fn compile_class(&mut self) {
@@ -151,11 +158,23 @@ impl Parser {
 
     fn compile_subroutine_dec(&mut self) {
         let token = self.tokenizer.consume();
-        if !match_token!(
-            token,
-            (TokenType::Keyword, "constructor" | "method" | "function")
-        ) {
-            self.error(token);
+        match (&token.type_, token.content.as_str()) {
+            (TokenType::Keyword, "function") => {}
+            (TokenType::Keyword, "method") => {
+                // For methods, we need to define 'this' as the first argument
+                self.func_symbols
+                    .define("this".to_string(), "int".to_string(), Kind::Arg);
+                self.writer.write_push(Segment::Argument, 0);
+                self.writer.write_pop(Segment::Pointer, 0); // this = pointer 0
+            }
+            (TokenType::Keyword, "constructor") => {
+                // For constructors, we need to allocate memory for the object's fields
+                let n_fields = self.class_symbols.var_count(Kind::Field);
+                self.writer.write_push(Segment::Constant, n_fields);
+                self.writer.write_call("Memory.alloc", 1);
+                self.writer.write_pop(Segment::Pointer, 0); // this = pointer 0
+            }
+            _ => self.error(token),
         }
 
         let token = self.tokenizer.peek();
@@ -265,7 +284,7 @@ impl Parser {
 
         self.tokenizer.expect(TokenType::Symbol, Some("="));
         self.compile_expression();
-        let (kind, index) = self.lookup_symbol(&name);
+        let (kind, _, index) = self.lookup_symbol(&name);
         self.writer.write_pop(kind.into(), index); // pop to local variable
         self.tokenizer.expect(TokenType::Symbol, Some(";"));
     }
@@ -401,10 +420,14 @@ impl Parser {
                         // pass 'this' as the first argument, this = pointer 0
                         self.writer.write_push(Segment::Pointer, 0);
                         let n_args = self.compile_argument_list();
-                        self.writer.write_call(&token.content, n_args + 1);
+                        self.writer.write_call(
+                            &format!("{}.{}", self.writer.class_name, token.content),
+                            n_args + 1,
+                        );
                     }
                     (TokenType::Symbol, ".") => {
-                        let (kind, index) = self.lookup_symbol(&token.content);
+                        let mut class_name = token.content;
+                        let (kind, type_, index) = self.lookup_symbol(&class_name);
 
                         // If the identifier is an object instance, hence a method call,
                         // we need to push the object instance onto the stack as 'this'.
@@ -414,20 +437,19 @@ impl Parser {
                         }
 
                         self.tokenizer.expect(TokenType::Symbol, Some("."));
-                        let func_name = self.tokenizer.expect(TokenType::Identifier, None);
+                        let func_name = self.tokenizer.expect(TokenType::Identifier, None).content;
                         let mut n_args = self.compile_argument_list();
 
                         if is_method {
                             n_args += 1; // pass 'this' as the first argument
+                            class_name = type_;
                         }
 
-                        self.writer.write_call(
-                            &format!("{}.{}", token.content, func_name.content),
-                            n_args,
-                        );
+                        self.writer
+                            .write_call(&format!("{}.{}", class_name, func_name), n_args);
                     }
                     _ => {
-                        let (kind, index) = self.lookup_symbol(&token.content);
+                        let (kind, _, index) = self.lookup_symbol(&token.content);
                         if kind == Kind::None {
                             self.tokenizer
                                 .error(&format!("Undefined identifier: {}", token.content));

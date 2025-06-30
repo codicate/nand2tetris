@@ -4,7 +4,7 @@ use std::path::Path;
 use strum_macros::{Display, EnumString};
 
 pub struct Writer {
-    class_name: String,
+    pub class_name: String,
     file: File,
     buffer: Vec<String>,
     label_counter: usize,
