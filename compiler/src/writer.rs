@@ -1,11 +1,25 @@
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use strum_macros::{Display, EnumString};
 
 pub struct Writer {
     class_name: String,
     file: File,
     buffer: Vec<String>,
+}
+
+#[derive(EnumString, Display, Debug, Clone, Copy)]
+#[strum(serialize_all = "lowercase")]
+pub enum Segment {
+    Local,
+    Argument,
+    This,
+    That,
+    Static,
+    Constant,
+    Pointer,
+    Temp,
 }
 
 impl Writer {
@@ -19,14 +33,12 @@ impl Writer {
         }
     }
 
-    pub fn write_push(&mut self, segment: &str, index: u32) {
-        self.buffer
-            .push(format!("push {} {}", segment.to_lowercase(), index));
+    pub fn write_push(&mut self, segment: Segment, index: usize) {
+        self.buffer.push(format!("push {} {}", segment, index));
     }
 
-    pub fn write_pop(&mut self, segment: &str, index: u32) {
-        self.buffer
-            .push(format!("pop {} {}", segment.to_lowercase(), index));
+    pub fn write_pop(&mut self, segment: Segment, index: usize) {
+        self.buffer.push(format!("pop {} {}", segment, index));
     }
 
     pub fn write_arithmetic(&mut self, command: &str) {
@@ -45,7 +57,7 @@ impl Writer {
         self.buffer.push(format!("if-goto {}", label));
     }
 
-    pub fn write_call(&mut self, name: &str, n_args: u32) {
+    pub fn write_call(&mut self, name: &str, n_args: usize) {
         self.buffer.push(format!("call {} {}", name, n_args));
     }
 
@@ -53,7 +65,7 @@ impl Writer {
         self.buffer.push("return".to_string());
     }
 
-    pub fn write_function(&mut self, func_name: &str, n_vars: u32) {
+    pub fn write_function(&mut self, func_name: &str, n_vars: usize) {
         writeln!(
             self.file,
             "function {}.{} {}",

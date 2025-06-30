@@ -1,4 +1,5 @@
 mod parser;
+mod symbol_table;
 mod tokenizer;
 mod writer;
 

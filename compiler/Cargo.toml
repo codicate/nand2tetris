@@ -2,3 +2,7 @@
 name = "compiler"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies]
+strum = "0.27"
+strum_macros = "0.27"
