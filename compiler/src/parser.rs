@@ -271,22 +271,41 @@ impl Parser {
         }
     }
 
+    /// computes base address + index and pushes the address onto the stack.
+    /// For example, for `a[i]`, it computes `a + i` and pushes the address of `a[i]`
+    fn compile_array_access(&mut self, name: &str) {
+        self.tokenizer.expect(TokenType::Symbol, Some("["));
+        let (kind, _, index) = self.lookup_symbol(name);
+        self.writer.write_push(kind.clone().into(), index);
+        self.compile_expression();
+        self.writer.write_arithmetic("add"); // add index to base address
+        self.tokenizer.expect(TokenType::Symbol, Some("]"));
+    }
+
     fn compile_let_statement(&mut self) {
         self.tokenizer.expect(TokenType::Keyword, Some("let"));
         let name = self.tokenizer.expect(TokenType::Identifier, None).content;
 
         let token = self.tokenizer.peek();
-        if !match_token!(token, (TokenType::Symbol, "=")) {
-            self.tokenizer.expect(TokenType::Symbol, Some("["));
-            self.compile_expression();
-            self.tokenizer.expect(TokenType::Symbol, Some("]"));
+        let is_array_access = match_token!(token, (TokenType::Symbol, "["));
+        if is_array_access {
+            self.compile_array_access(&name);
         }
 
         self.tokenizer.expect(TokenType::Symbol, Some("="));
         self.compile_expression();
-        let (kind, _, index) = self.lookup_symbol(&name);
-        self.writer.write_pop(kind.into(), index); // pop to local variable
         self.tokenizer.expect(TokenType::Symbol, Some(";"));
+
+        if is_array_access {
+            // stack: [..., LHS (a[i]), RHS (value)]
+            self.writer.write_pop(Segment::Temp, 0); // store RHS to temp
+            self.writer.write_pop(Segment::Pointer, 1); // store LHS to pointer 1
+            self.writer.write_push(Segment::Temp, 0); // push RHS back to stack
+            self.writer.write_pop(Segment::That, 0); // store RHS to LHS (a[i])
+        } else {
+            let (kind, _, index) = self.lookup_symbol(&name);
+            self.writer.write_pop(kind.into(), index);
+        }
     }
 
     fn compile_if_statement(&mut self) {
@@ -385,7 +404,16 @@ impl Parser {
                 let value: usize = token.content.parse().unwrap();
                 self.writer.write_push(Segment::Constant, value);
             }
-            (TokenType::StringConstant, _) => {}
+            (TokenType::StringConstant, _) => {
+                let value = token.content.trim_matches('"');
+                self.writer.write_push(Segment::Constant, value.len());
+                self.writer.write_call("String.new", 1);
+
+                for c in value.chars() {
+                    self.writer.write_push(Segment::Constant, c as u32 as usize);
+                    self.writer.write_call("String.appendChar", 2);
+                }
+            }
             (TokenType::Keyword, "true") => {
                 self.writer.write_push(Segment::Constant, 1);
                 self.writer.write_arithmetic("neg");
@@ -412,9 +440,9 @@ impl Parser {
                 let next = self.tokenizer.peek();
                 match (&next.type_, next.content.as_str()) {
                     (TokenType::Symbol, "[") => {
-                        self.tokenizer.expect(TokenType::Symbol, Some("["));
-                        self.compile_expression();
-                        self.tokenizer.expect(TokenType::Symbol, Some("]"));
+                        self.compile_array_access(&token.content);
+                        self.writer.write_pop(Segment::Pointer, 1);
+                        self.writer.write_push(Segment::That, 0);
                     }
                     (TokenType::Symbol, "(") => {
                         // pass 'this' as the first argument, this = pointer 0
