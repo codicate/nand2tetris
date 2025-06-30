@@ -7,6 +7,7 @@ pub struct Writer {
     class_name: String,
     file: File,
     buffer: Vec<String>,
+    label_counter: usize,
 }
 
 #[derive(EnumString, Display, Debug, Clone, Copy)]
@@ -30,7 +31,14 @@ impl Writer {
             class_name,
             file,
             buffer: Vec::new(),
+            label_counter: 0,
         }
+    }
+
+    pub fn new_label(&mut self) -> String {
+        let label = format!("L{}", self.label_counter);
+        self.label_counter += 1;
+        label
     }
 
     pub fn write_push(&mut self, segment: Segment, index: usize) {
@@ -75,6 +83,7 @@ impl Writer {
         for line in &self.buffer {
             writeln!(self.file, "{}", line).unwrap();
         }
+        self.buffer.clear();
     }
 
     pub fn close(mut self) {

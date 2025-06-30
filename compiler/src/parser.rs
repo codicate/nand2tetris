@@ -272,33 +272,54 @@ impl Parser {
 
     fn compile_if_statement(&mut self) {
         self.tokenizer.expect(TokenType::Keyword, Some("if"));
-        self.tokenizer.expect(TokenType::Symbol, Some("(`"));
+        self.tokenizer.expect(TokenType::Symbol, Some("("));
         self.compile_expression();
         self.tokenizer.expect(TokenType::Symbol, Some(")"));
+
+        self.writer.write_arithmetic("not");
+        let label1 = self.writer.new_label();
+        self.writer.write_if(&label1);
+
         self.tokenizer.expect(TokenType::Symbol, Some("{"));
         self.compile_statements();
         self.tokenizer.expect(TokenType::Symbol, Some("}"));
 
         let token = self.tokenizer.peek();
-        if match_token!(token, (TokenType::Keyword, "else")) {
+        if !match_token!(token, (TokenType::Keyword, "else")) {
+            self.writer.write_label(&label1);
+        } else {
             self.tokenizer.expect(TokenType::Keyword, Some("else"));
+            let label2 = self.writer.new_label();
+            self.writer.write_goto(&label2);
+            self.writer.write_label(&label1);
+
             self.tokenizer.expect(TokenType::Symbol, Some("{"));
             self.compile_statements();
             self.tokenizer.expect(TokenType::Symbol, Some("}"));
+            self.writer.write_label(&label2);
         }
     }
 
     fn compile_while_statement(&mut self) {
+        let label1 = self.writer.new_label();
+        self.writer.write_label(&label1);
+
         self.tokenizer.expect(TokenType::Keyword, Some("while"));
         self.tokenizer.expect(TokenType::Symbol, Some("("));
         self.compile_expression();
         self.tokenizer.expect(TokenType::Symbol, Some(")"));
+
+        self.writer.write_arithmetic("not");
+        let label2 = self.writer.new_label();
+        self.writer.write_if(&label2);
+
         self.tokenizer.expect(TokenType::Symbol, Some("{"));
         self.compile_statements();
         self.tokenizer.expect(TokenType::Symbol, Some("}"));
+        self.writer.write_goto(&label1);
+        self.writer.write_label(&label2);
     }
 
-    // done
     fn compile_do_statement(&mut self) {
         self.tokenizer.expect(TokenType::Keyword, Some("do"));
         self.compile_expression();
@@ -306,7 +327,6 @@ impl Parser {
         self.writer.write_pop(Segment::Temp, 0); // discard return value
     }
 
-    // done
     fn compile_return_statement(&mut self) {
         self.tokenizer.expect(TokenType::Keyword, Some("return"));
 
@@ -346,8 +366,17 @@ impl Parser {
                 let value: usize = token.content.parse().unwrap();
                 self.writer.write_push(Segment::Constant, value);
             }
-            (TokenType::StringConstant, _)
-            | (TokenType::Keyword, "true" | "false" | "null" | "this") => {}
+            (TokenType::StringConstant, _) => {}
+            (TokenType::Keyword, "true") => {
+                self.writer.write_push(Segment::Constant, 1);
+                self.writer.write_arithmetic("neg");
+            }
+            (TokenType::Keyword, "false" | "null") => {
+                self.writer.write_push(Segment::Constant, 0);
+            }
+            (TokenType::Keyword, "this") => {
+                self.writer.write_push(Segment::Pointer, 0); // this = pointer 0
+            }
             (TokenType::Symbol, "-") => {
                 self.compile_term();
                 self.writer.write_arithmetic("neg");
