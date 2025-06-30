@@ -30,6 +30,21 @@ pub struct Parser {
 }
 
 impl Parser {
+    fn translate_op(op: &str) -> &'static str {
+        match op {
+            "+" => "add",
+            "-" => "sub",
+            "*" => "call Math.multiply 2",
+            "/" => "call Math.divide 2",
+            "&" => "and",
+            "|" => "or",
+            "<" => "lt",
+            ">" => "gt",
+            "=" => "eq",
+            _ => panic!(),
+        }
+    }
+
     pub fn new(path: &Path, content: String) -> Self {
         let tokenizer = Tokenizer::new(path, content);
         let writer = Writer::new(path);
@@ -116,11 +131,13 @@ impl Parser {
             self.compile_type();
         }
 
-        self.tokenizer.expect(TokenType::Identifier, None);
+        let name = self.tokenizer.expect(TokenType::Identifier, None);
         self.tokenizer.expect(TokenType::Symbol, Some("("));
         self.compile_parameter_list();
         self.tokenizer.expect(TokenType::Symbol, Some(")"));
         self.compile_subroutine_body();
+
+        self.writer.write_function(&name.content, 0);
     }
 
     fn compile_parameter_list(&mut self) {
@@ -236,13 +253,15 @@ impl Parser {
         self.tokenizer.expect(TokenType::Symbol, Some("}"));
     }
 
+    // done
     fn compile_do_statement(&mut self) {
         self.tokenizer.expect(TokenType::Keyword, Some("do"));
-        self.tokenizer.expect(TokenType::Identifier, None);
-        self.compile_subroutine_call();
+        self.compile_expression();
         self.tokenizer.expect(TokenType::Symbol, Some(";"));
+        self.writer.write_pop("temp", 0); // discard return value
     }
 
+    // done
     fn compile_return_statement(&mut self) {
         self.tokenizer.expect(TokenType::Keyword, Some("return"));
 
@@ -262,8 +281,10 @@ impl Parser {
             let token = self.tokenizer.peek();
             match (&token.type_, token.content.as_str()) {
                 (TokenType::Symbol, "+" | "-" | "*" | "/" | "&" | "|" | "<" | ">" | "=") => {
-                    self.tokenizer.consume();
+                    let op = self.tokenizer.consume();
                     self.compile_term();
+                    let command = Self::translate_op(&op.content);
+                    self.writer.write_arithmetic(command);
                 }
                 _ => break,
             }
@@ -274,8 +295,11 @@ impl Parser {
         let token = self.tokenizer.consume();
 
         match (&token.type_, token.content.as_str()) {
-            (TokenType::IntegerConstant, _)
-            | (TokenType::StringConstant, _)
+            (TokenType::IntegerConstant, _) => {
+                let value: u32 = token.content.parse().unwrap();
+                self.writer.write_push("constant", value);
+            }
+            (TokenType::StringConstant, _)
             | (TokenType::Keyword, "true" | "false" | "null" | "this") => {}
             (TokenType::Symbol, "-" | "~") => {
                 self.compile_term();
@@ -292,7 +316,32 @@ impl Parser {
                         self.compile_expression();
                         self.tokenizer.expect(TokenType::Symbol, Some("]"));
                     }
-                    (TokenType::Symbol, "." | "(") => self.compile_subroutine_call(),
+                    (TokenType::Symbol, "(") => {
+                        // pass 'this' as the first argument, this = pointer 0
+                        self.writer.write_push("pointer", 0);
+                        let n_args = self.compile_expression_list();
+                        self.writer.write_call(&token.content, n_args + 1);
+                    }
+                    (TokenType::Symbol, ".") => {
+                        let kind = "none";
+                        let is_method = kind != "none";
+                        if is_method {
+                            self.writer.write_push(kind, 0);
+                        }
+
+                        self.tokenizer.expect(TokenType::Symbol, Some("."));
+                        let func_name = self.tokenizer.expect(TokenType::Identifier, None);
+                        let mut n_args = self.compile_expression_list();
+
+                        if is_method {
+                            n_args += 1; // pass 'this' as the first argument
+                        }
+
+                        self.writer.write_call(
+                            &format!("{}.{}", token.content, func_name.content),
+                            n_args,
+                        );
+                    }
                     _ => {}
                 }
             }
@@ -300,29 +349,14 @@ impl Parser {
         }
     }
 
-    fn compile_subroutine_call(&mut self) {
-        let token = self.tokenizer.peek();
-        match (&token.type_, token.content.as_str()) {
-            (TokenType::Symbol, "(") => {
-                self.tokenizer.expect(TokenType::Symbol, Some("("));
-                self.compile_expression_list();
-                self.tokenizer.expect(TokenType::Symbol, Some(")"));
-            }
-            (TokenType::Symbol, ".") => {
-                self.tokenizer.expect(TokenType::Symbol, Some("."));
-                self.tokenizer.expect(TokenType::Identifier, None);
-                self.tokenizer.expect(TokenType::Symbol, Some("("));
-                self.compile_expression_list();
-                self.tokenizer.expect(TokenType::Symbol, Some(")"));
-            }
-            _ => self.error(token),
-        }
-    }
+    fn compile_expression_list(&mut self) -> u32 {
+        self.tokenizer.expect(TokenType::Symbol, Some("("));
+        let mut n_args = 0;
 
-    fn compile_expression_list(&mut self) {
         let token = self.tokenizer.peek();
         if !match_token!(token, (TokenType::Symbol, ")")) {
             self.compile_expression();
+            n_args += 1;
 
             while self.tokenizer.has_more_tokens() {
                 let token = self.tokenizer.peek();
@@ -330,10 +364,14 @@ impl Parser {
                     (TokenType::Symbol, ",") => {
                         self.tokenizer.consume();
                         self.compile_expression();
+                        n_args += 1;
                     }
                     _ => break,
                 }
             }
         }
+
+        self.tokenizer.expect(TokenType::Symbol, Some(")"));
+        n_args
     }
 }

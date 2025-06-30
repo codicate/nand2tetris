@@ -3,17 +3,8 @@ mod tokenizer;
 mod writer;
 
 use parser::Parser;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{env, fs};
-
-// Convert the file extension of a given path to the specified extension
-pub fn convert_file_extension(path: &Path, extension: &str) -> PathBuf {
-    let stem = path.file_stem().unwrap().to_string_lossy();
-    let parent = path.parent().unwrap_or_else(|| Path::new(""));
-
-    // Construct a new path: parent + stem + ".vm"
-    parent.join(format!("{}.{}", stem, extension))
-}
 
 // fn generate_tokenizer_output(path: &Path, content: String) {
 //     let mut tokenizer = Tokenizer::new(path.to_string_lossy().to_string(), content);
