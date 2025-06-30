@@ -86,7 +86,7 @@ impl Writer {
         self.buffer.clear();
     }
 
-    pub fn close(mut self) {
+    pub fn close(&mut self) {
         self.file.flush().unwrap();
     }
 }

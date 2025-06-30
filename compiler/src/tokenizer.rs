@@ -17,36 +17,6 @@ pub struct Token {
     column_number: usize,
 }
 
-impl Token {
-    fn lowercase_first_letter(s: &str) -> String {
-        let mut chars = s.chars();
-        match chars.next() {
-            Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
-            None => String::new(),
-        }
-    }
-
-    fn escape_xml_char(c: &str) -> String {
-        match c {
-            "<" => "&lt;".to_string(),
-            ">" => "&gt;".to_string(),
-            "\"" => "&quot;".to_string(),
-            "&" => "&amp;".to_string(),
-            _ => c.to_string(),
-        }
-    }
-
-    pub fn output(&self) -> String {
-        let type_ = Self::lowercase_first_letter(&format!("{:?}", self.type_));
-        format!(
-            "<{}> {} </{}>\n",
-            type_,
-            Self::escape_xml_char(self.content.as_str()),
-            type_
-        )
-    }
-}
-
 pub struct Tokenizer {
     path: String,
     content: Vec<char>,
@@ -279,19 +249,5 @@ impl Tokenizer {
                 token.content
             ));
         }
-    }
-
-    pub fn output(&mut self) -> String {
-        let mut output = String::new();
-        output.push_str("<tokens>\n");
-
-        while self.has_more_tokens() {
-            if let Some(token) = self.advance() {
-                output.push_str(&token.output());
-            }
-        }
-
-        output.push_str("</tokens>\n");
-        output
     }
 }

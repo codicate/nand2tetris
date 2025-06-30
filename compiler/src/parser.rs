@@ -51,6 +51,7 @@ impl Parser {
 
     pub fn parse(&mut self) -> () {
         self.compile_class();
+        self.writer.close();
     }
 
     fn error(&mut self, token: Token) -> ! {
