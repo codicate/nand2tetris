@@ -1,3 +1,5 @@
+use std::path::Path;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TokenType {
     Keyword,
@@ -92,9 +94,9 @@ impl Tokenizer {
         s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     }
 
-    pub fn new(path: String, content: String) -> Self {
+    pub fn new(path: &Path, content: String) -> Self {
         Tokenizer {
-            path,
+            path: path.to_string_lossy().to_string(),
             content: content.chars().collect(),
             peeked: None,
             idx: 0,

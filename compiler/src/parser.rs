@@ -1,10 +1,14 @@
-use crate::tokenizer::{Token, TokenType, Tokenizer};
+use std::path::{Path, PathBuf};
+
+use crate::{
+    tokenizer::{Token, TokenType, Tokenizer},
+    writer::Writer,
+};
 
 macro_rules! expect {
     ($self_:ident, $( $pattern:pat_param )|+) => {
         let token = $self_.tokenizer.consume();
         if matches!((&token.type_, token.content.as_str()), $( $pattern )|+ ) {
-            $self_.output.push_str(token.output().as_str());
         } else {
             $self_.error(token);
         }
@@ -22,21 +26,18 @@ macro_rules! match_token {
 
 pub struct Parser {
     tokenizer: Tokenizer,
-    output: String,
+    writer: Writer,
 }
 
 impl Parser {
-    pub fn new(path: String, content: String) -> Self {
-        let tokenizer = Tokenizer::new(path.clone(), content);
-        Parser {
-            tokenizer,
-            output: String::new(),
-        }
+    pub fn new(path: &Path, content: String) -> Self {
+        let tokenizer = Tokenizer::new(path, content);
+        let writer = Writer::new(path);
+        Parser { tokenizer, writer }
     }
 
-    pub fn parse(&mut self) -> String {
+    pub fn parse(&mut self) -> () {
         self.compile_class();
-        self.output.clone()
     }
 
     fn error(&mut self, token: Token) -> ! {
@@ -48,11 +49,9 @@ impl Parser {
 
     fn expect(&mut self, type_: TokenType, content: Option<&str>) -> () {
         let token = self.tokenizer.expect(type_, content);
-        self.output.push_str(&token.output());
     }
 
     fn compile_class(&mut self) {
-        self.output.push_str("<class>\n");
         self.expect(TokenType::Keyword, Some("class"));
         self.expect(TokenType::Identifier, None);
         self.expect(TokenType::Symbol, Some("{"));
@@ -78,7 +77,6 @@ impl Parser {
         }
 
         self.expect(TokenType::Symbol, Some("}"));
-        self.output.push_str("</class>\n");
     }
 
     fn compile_var_list(&mut self) {
@@ -87,7 +85,6 @@ impl Parser {
             match (&token.type_, token.content.as_str()) {
                 (TokenType::Symbol, ",") => {
                     self.tokenizer.consume();
-                    self.output.push_str(token.output().as_str());
                     self.expect(TokenType::Identifier, None);
                 }
                 _ => break,
@@ -96,13 +93,11 @@ impl Parser {
     }
 
     fn compile_class_var_dec(&mut self) {
-        self.output.push_str("<classVarDec>\n");
         expect!(self, (TokenType::Keyword, "static" | "field"));
         self.compile_type();
         self.expect(TokenType::Identifier, None);
         self.compile_var_list();
         self.expect(TokenType::Symbol, Some(";"));
-        self.output.push_str("</classVarDec>\n");
     }
 
     fn compile_type(&mut self) {
@@ -113,7 +108,6 @@ impl Parser {
     }
 
     fn compile_subroutine_dec(&mut self) {
-        self.output.push_str("<subroutineDec>\n");
         expect!(
             self,
             (TokenType::Keyword, "constructor" | "method" | "function")
@@ -122,7 +116,6 @@ impl Parser {
         let token = self.tokenizer.peek();
         if match_token!(token, (TokenType::Keyword, "void")) {
             self.tokenizer.consume();
-            self.output.push_str(token.output().as_str());
         } else {
             self.compile_type();
         }
@@ -132,12 +125,9 @@ impl Parser {
         self.compile_parameter_list();
         self.expect(TokenType::Symbol, Some(")"));
         self.compile_subroutine_body();
-        self.output.push_str("</subroutineDec>\n");
     }
 
     fn compile_parameter_list(&mut self) {
-        self.output.push_str("<parameterList>\n");
-
         let token = self.tokenizer.peek();
         if !match_token!(token, (TokenType::Symbol, ")")) {
             self.compile_type();
@@ -148,7 +138,6 @@ impl Parser {
                 match (&token.type_, token.content.as_str()) {
                     (TokenType::Symbol, ",") => {
                         self.tokenizer.consume();
-                        self.output.push_str(token.output().as_str());
                         self.compile_type();
                         self.expect(TokenType::Identifier, None);
                     }
@@ -156,12 +145,9 @@ impl Parser {
                 }
             }
         }
-
-        self.output.push_str("</parameterList>\n");
     }
 
     fn compile_subroutine_body(&mut self) {
-        self.output.push_str("<subroutineBody>\n");
         self.expect(TokenType::Symbol, Some("{"));
 
         while self.tokenizer.has_more_tokens() {
@@ -176,21 +162,17 @@ impl Parser {
 
         self.compile_statements();
         self.expect(TokenType::Symbol, Some("}"));
-        self.output.push_str("</subroutineBody>\n");
     }
 
     fn compile_var_dec(&mut self) {
-        self.output.push_str("<varDec>\n");
         self.expect(TokenType::Keyword, Some("var"));
         self.compile_type();
         self.expect(TokenType::Identifier, None);
         self.compile_var_list();
         self.expect(TokenType::Symbol, Some(";"));
-        self.output.push_str("</varDec>\n");
     }
 
     fn compile_statements(&mut self) {
-        self.output.push_str("<statements>\n");
         while self.tokenizer.has_more_tokens() {
             let token = self.tokenizer.peek();
             match (&token.type_, token.content.as_str()) {
@@ -212,11 +194,9 @@ impl Parser {
                 _ => break,
             }
         }
-        self.output.push_str("</statements>\n");
     }
 
     fn compile_let_statement(&mut self) {
-        self.output.push_str("<letStatement>\n");
         self.expect(TokenType::Keyword, Some("let"));
         self.expect(TokenType::Identifier, None);
 
@@ -230,11 +210,9 @@ impl Parser {
         self.expect(TokenType::Symbol, Some("="));
         self.compile_expression();
         self.expect(TokenType::Symbol, Some(";"));
-        self.output.push_str("</letStatement>\n");
     }
 
     fn compile_if_statement(&mut self) {
-        self.output.push_str("<ifStatement>\n");
         self.expect(TokenType::Keyword, Some("if"));
         self.expect(TokenType::Symbol, Some("("));
         self.compile_expression();
@@ -250,12 +228,9 @@ impl Parser {
             self.compile_statements();
             self.expect(TokenType::Symbol, Some("}"));
         }
-
-        self.output.push_str("</ifStatement>\n");
     }
 
     fn compile_while_statement(&mut self) {
-        self.output.push_str("<whileStatement>\n");
         self.expect(TokenType::Keyword, Some("while"));
         self.expect(TokenType::Symbol, Some("("));
         self.compile_expression();
@@ -263,20 +238,16 @@ impl Parser {
         self.expect(TokenType::Symbol, Some("{"));
         self.compile_statements();
         self.expect(TokenType::Symbol, Some("}"));
-        self.output.push_str("</whileStatement>\n");
     }
 
     fn compile_do_statement(&mut self) {
-        self.output.push_str("<doStatement>\n");
         self.expect(TokenType::Keyword, Some("do"));
         self.expect(TokenType::Identifier, None);
         self.compile_subroutine_call();
         self.expect(TokenType::Symbol, Some(";"));
-        self.output.push_str("</doStatement>\n");
     }
 
     fn compile_return_statement(&mut self) {
-        self.output.push_str("<returnStatement>\n");
         self.expect(TokenType::Keyword, Some("return"));
 
         let token = self.tokenizer.peek();
@@ -285,11 +256,9 @@ impl Parser {
         }
 
         self.expect(TokenType::Symbol, Some(";"));
-        self.output.push_str("</returnStatement>\n");
     }
 
     fn compile_expression(&mut self) {
-        self.output.push_str("<expression>\n");
         self.compile_term();
 
         while self.tokenizer.has_more_tokens() {
@@ -297,20 +266,15 @@ impl Parser {
             match (&token.type_, token.content.as_str()) {
                 (TokenType::Symbol, "+" | "-" | "*" | "/" | "&" | "|" | "<" | ">" | "=") => {
                     self.tokenizer.consume();
-                    self.output.push_str(token.output().as_str());
                     self.compile_term();
                 }
                 _ => break,
             }
         }
-
-        self.output.push_str("</expression>\n");
     }
 
     fn compile_term(&mut self) {
-        self.output.push_str("<term>\n");
         let token = self.tokenizer.consume();
-        self.output.push_str(token.output().as_str());
 
         match (&token.type_, token.content.as_str()) {
             (TokenType::IntegerConstant, _)
@@ -337,8 +301,6 @@ impl Parser {
             }
             _ => self.error(token),
         }
-
-        self.output.push_str("</term>\n");
     }
 
     fn compile_subroutine_call(&mut self) {
@@ -361,7 +323,6 @@ impl Parser {
     }
 
     fn compile_expression_list(&mut self) {
-        self.output.push_str("<expressionList>\n");
         let token = self.tokenizer.peek();
         if !match_token!(token, (TokenType::Symbol, ")")) {
             self.compile_expression();
@@ -371,14 +332,11 @@ impl Parser {
                 match (&token.type_, token.content.as_str()) {
                     (TokenType::Symbol, ",") => {
                         self.tokenizer.consume();
-                        self.output.push_str(token.output().as_str());
                         self.compile_expression();
                     }
                     _ => break,
                 }
             }
         }
-
-        self.output.push_str("</expressionList>\n");
     }
 }

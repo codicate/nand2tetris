@@ -1,14 +1,13 @@
 mod parser;
 mod tokenizer;
+mod writer;
 
 use parser::Parser;
-use std::env;
-use std::fs::{self, File};
-use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 // Convert the file extension of a given path to the specified extension
-fn convert_file_extension(path: &Path, extension: &str) -> PathBuf {
+pub fn convert_file_extension(path: &Path, extension: &str) -> PathBuf {
     let stem = path.file_stem().unwrap().to_string_lossy();
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
 
@@ -33,11 +32,8 @@ fn parse_file(path: &Path) {
         }
     };
 
-    let mut parser = Parser::new(path.to_string_lossy().to_string(), content);
-    let output = parser.parse();
-    let output_path = convert_file_extension(path, "parse.xml");
-    let mut output_file = File::create(output_path).unwrap();
-    output_file.write_all(output.as_bytes()).unwrap();
+    let mut parser = Parser::new(path, content);
+    parser.parse();
 }
 
 fn main() {
